@@ -1,0 +1,47 @@
+# Compiled object files
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+
+# Executable files
+*.exe
+*.out
+*.app
+*.elf
+*.bin
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# CMake build directory
+/build/
+cmake-build-*/
+
+# CodeBlocks project files
+*.depend
+*.layout
+
+# Eclipse project files
+.cproject
+.project
+
+# Visual Studio Code settings
+.vscode/
+
+# Other
+*.log
