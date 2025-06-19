@@ -19,6 +19,7 @@
         On case of using this code, please credit me (OakyMac, or just put "r/OakyMac") as the original author.
     LICENSE:
         This code is licensed under the MIT License.
+
     
 */
 
@@ -26,6 +27,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+
+#define VDISP_WIDTH 320
+#define VDISP_HEIGHT 240
 
 #define MEM_SIZE 1024
 #define REG_COUNT 8
@@ -36,6 +40,13 @@ uint32_t regs[REG_COUNT];
 uint8_t memory[MEM_SIZE];
 uint32_t pc = 0; // Program counter
 uint8_t running = 1;
+
+// Function prototypes
+void vdisp_init();
+void vdisp_quit();
+void wait_for_window_close();
+void tdraw_clear();
+void tdraw_pixel(int x, int y, char c);
 
 // Simple instruction set
 typedef enum {
@@ -48,7 +59,20 @@ typedef enum {
     JMP,    // 6: JMP addr
     CMP,    // 7: CMP reg1, reg2
     JE,     // 8: JE addr
-    HALT    // 9
+    HALT,   // 9
+    AND,    // 10
+    ORR,    // 11
+    EOR,    // 12
+    LSL,    // 13
+    LSR,    // 14
+    MUL,    // 15
+    UDIV,   // 16
+    NEG,    // 17
+    MOVZ,   // 18
+    MOVN,   // 19
+    PRINT,   // 20
+    TDRAW_CLEAR,
+    TDRAW_PIXEL
 } Instr;
 
 typedef struct {
@@ -104,57 +128,58 @@ void execute_instruction(Instruction *inst) {
         case HALT:
             running = 0;
             break;
-
-        // --- AArch64-inspired instructions ---
-        // AND reg1, reg2
-        case 10: // AND
+        case AND:
             if (inst->op1 < REG_COUNT && inst->op2 < REG_COUNT)
                 regs[inst->op1] &= regs[inst->op2];
             break;
-        // ORR reg1, reg2
-        case 11: // ORR
+        case ORR:
             if (inst->op1 < REG_COUNT && inst->op2 < REG_COUNT)
                 regs[inst->op1] |= regs[inst->op2];
             break;
-        // EOR reg1, reg2
-        case 12: // EOR
+        case EOR:
             if (inst->op1 < REG_COUNT && inst->op2 < REG_COUNT)
                 regs[inst->op1] ^= regs[inst->op2];
             break;
-        // LSL reg1, imm
-        case 13: // LSL
+        case LSL:
             if (inst->op1 < REG_COUNT)
                 regs[inst->op1] <<= inst->imm;
             break;
-        // LSR reg1, imm
-        case 14: // LSR
+        case LSR:
             if (inst->op1 < REG_COUNT)
                 regs[inst->op1] >>= inst->imm;
             break;
-        // MUL reg1, reg2
-        case 15: // MUL
+        case MUL:
             if (inst->op1 < REG_COUNT && inst->op2 < REG_COUNT)
                 regs[inst->op1] *= regs[inst->op2];
             break;
-        // UDIV reg1, reg2
-        case 16: // UDIV
+        case UDIV:
             if (inst->op1 < REG_COUNT && inst->op2 < REG_COUNT && regs[inst->op2] != 0)
                 regs[inst->op1] /= regs[inst->op2];
             break;
-        // NEG reg1
-        case 17: // NEG
+        case NEG:
             if (inst->op1 < REG_COUNT)
                 regs[inst->op1] = -regs[inst->op1];
             break;
-        // MOVZ reg, imm (move zero-extended immediate)
-        case 18: // MOVZ
+        case MOVZ:
             if (inst->op1 < REG_COUNT)
                 regs[inst->op1] = (uint16_t)inst->imm;
             break;
-        // MOVN reg, imm (move NOT of immediate)
-        case 19: // MOVN
+        case MOVN:
             if (inst->op1 < REG_COUNT)
                 regs[inst->op1] = ~(inst->imm);
+            break;
+        case PRINT:
+            // PRINT REG idx  or PRINT MEM idx
+            if (inst->op1 == 0 && inst->imm < REG_COUNT) // REG
+                printf("R%u = %u\n", inst->imm, regs[inst->imm]);
+            else if (inst->op1 == 1 && inst->imm < MEM_SIZE) // MEM
+                printf("MEM[%u] = %u\n", inst->imm, memory[inst->imm]);
+            break;
+        case TDRAW_CLEAR:
+            tdraw_clear();
+            break;
+        case TDRAW_PIXEL:
+            tdraw_pixel(regs[inst->imm & 0xFF], regs[(inst->imm >> 8) & 0xFF], (char)((inst->imm >> 16) & 0xFF));
             break;
         default:
             break;
@@ -163,8 +188,8 @@ void execute_instruction(Instruction *inst) {
 
 // Simple assembler for demo
 int assemble(const char *line, Instruction *inst) {
-    char op[16], arg1[16], arg2[16];
-    int n = sscanf(line, "%15s %15s %15s", op, arg1, arg2);
+    char op[32], arg1[32], arg2[32], arg3[32];
+    int n = sscanf(line, "%31s %31s %31s %31s", op, arg1, arg2, arg3);
     if (n < 1) return 0;
     if (strcmp(op, "NOP") == 0) { inst->opcode = NOP; }
     else if (strcmp(op, "MOV") == 0 && n == 3) {
@@ -206,56 +231,75 @@ int assemble(const char *line, Instruction *inst) {
         inst->imm = atoi(arg1);
     }
     else if (strcmp(op, "HALT") == 0) { inst->opcode = HALT; }
-
-    // --- New instructions ---
     else if (strcmp(op, "AND") == 0 && n == 3) {
-        inst->opcode = 10;
+        inst->opcode = AND;
         inst->op1 = arg1[1] - '0';
         inst->op2 = arg2[1] - '0';
     }
     else if (strcmp(op, "ORR") == 0 && n == 3) {
-        inst->opcode = 11;
+        inst->opcode = ORR;
         inst->op1 = arg1[1] - '0';
         inst->op2 = arg2[1] - '0';
     }
     else if (strcmp(op, "EOR") == 0 && n == 3) {
-        inst->opcode = 12;
+        inst->opcode = EOR;
         inst->op1 = arg1[1] - '0';
         inst->op2 = arg2[1] - '0';
     }
     else if (strcmp(op, "LSL") == 0 && n == 3) {
-        inst->opcode = 13;
+        inst->opcode = LSL;
         inst->op1 = arg1[1] - '0';
         inst->imm = atoi(arg2);
     }
     else if (strcmp(op, "LSR") == 0 && n == 3) {
-        inst->opcode = 14;
+        inst->opcode = LSR;
         inst->op1 = arg1[1] - '0';
         inst->imm = atoi(arg2);
     }
     else if (strcmp(op, "MUL") == 0 && n == 3) {
-        inst->opcode = 15;
+        inst->opcode = MUL;
         inst->op1 = arg1[1] - '0';
         inst->op2 = arg2[1] - '0';
     }
     else if (strcmp(op, "UDIV") == 0 && n == 3) {
-        inst->opcode = 16;
+        inst->opcode = UDIV;
         inst->op1 = arg1[1] - '0';
         inst->op2 = arg2[1] - '0';
     }
     else if (strcmp(op, "NEG") == 0 && n == 2) {
-        inst->opcode = 17;
+        inst->opcode = NEG;
         inst->op1 = arg1[1] - '0';
     }
     else if (strcmp(op, "MOVZ") == 0 && n == 3) {
-        inst->opcode = 18;
+        inst->opcode = MOVZ;
         inst->op1 = arg1[1] - '0';
         inst->imm = atoi(arg2);
     }
     else if (strcmp(op, "MOVN") == 0 && n == 3) {
-        inst->opcode = 19;
+        inst->opcode = MOVN;
         inst->op1 = arg1[1] - '0';
         inst->imm = atoi(arg2);
+    }
+    else if (strcmp(op, "PRINT") == 0 && n == 3) {
+        inst->opcode = PRINT;
+        if (strcmp(arg1, "REG") == 0) {
+            inst->op1 = 0;
+            inst->imm = atoi(arg2);
+        } else if (strcmp(arg1, "MEM") == 0) {
+            inst->op1 = 1;
+            inst->imm = atoi(arg2);
+        } else {
+            return 0;
+        }
+    }
+    else if (strcmp(op, "TDRAW_CLEAR") == 0) {
+        inst->opcode = TDRAW_CLEAR;
+    } else if (strcmp(op, "TDRAW_PIXEL") == 0 && n == 4) {
+        inst->opcode = TDRAW_PIXEL;
+        int rx = arg1[1] - '0';
+        int ry = arg2[1] - '0';
+        int ch = arg3[0];
+        inst->imm = rx | (ry << 8) | (ch << 16);
     }
     else return 0;
     return 1;
@@ -335,6 +379,7 @@ void shell() {
                 pc++;
             }
             printf("Program finished.\n");
+       //     wait_for_window_close(); // <-- Only after running the program
         }
         else {
             printf("Unknown command. Type 'help'.\n");
@@ -342,10 +387,50 @@ void shell() {
     }
 }
 
-int main() {
+// CLI mode: load and run file
+void run_file(const char *fname) {
+    FILE *f = fopen(fname, "r");
+    if (!f) {
+        printf("Cannot open file: %s\n", fname);
+        return;
+    }
+    char pline[MAX_LINE];
+    int idx = 0;
+    while (fgets(pline, sizeof(pline), f) && idx < MEM_SIZE) {
+        if (assemble(pline, &program[idx]))
+            idx++;
+    }
+    fclose(f);
+    printf("Loaded %d instructions from %s\n", idx, fname);
+    pc = 0;
+    running = 1;
+    while (running && pc < MEM_SIZE) {
+        execute_instruction(&program[pc]);
+        pc++;
+    }
+    printf("Program finished.\n");
+}
+
+void tdraw_clear() {
+    printf("\033[2J\033[H"); // ANSI clear screen and move cursor to home
+    fflush(stdout);
+}
+
+void tdraw_pixel(int x, int y, char c) {
+    printf("\033[%d;%dH%c", y + 1, x + 1, c); // ANSI move cursor and print char
+    fflush(stdout);
+}
+
+
+
+int main(int argc, char **argv) {
     memset(regs, 0, sizeof(regs));
     memset(memory, 0, sizeof(memory));
     memset(program, 0, sizeof(program));
-    shell();
+    if (argc > 1) {
+        run_file(argv[1]);
+    } else {
+        shell();
+    }
     return 0;
 }
